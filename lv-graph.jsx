@@ -292,6 +292,7 @@ function Bubbles(props) {
     sizeMode = 'count',
     filters = {},
     search = '',
+    hideMode = 'dim',
   } = props;
 
   const wrapRef = useRef(null);
@@ -781,6 +782,7 @@ function Bubbles(props) {
                 onToggleCollapse={() => toggleCollapse(info.id)}
                 openTasks={openTasks}
                 rOverride={mi?.r}
+                hideMode={hideMode}
                 subLabel={mi?.sub} />
             );
           })}
@@ -808,7 +810,7 @@ function Bubbles(props) {
 // ─────────────────────────────────────────────────────────────
 
 function BubbleNode({ info, k, dim, hovered, setHovered, onClick,
-  collapsible, isCollapsed, childCount, onToggleCollapse, openTasks, rOverride, subLabel }) {
+  collapsible, isCollapsed, childCount, onToggleCollapse, openTasks, rOverride, subLabel, hideMode = 'dim' }) {
   const n = info.node;
   const r = rOverride != null ? rOverride : (RADII[n.kind] || 14);
   const showLabel = k >= (LABEL_K[n.kind] || 0.5);
@@ -829,23 +831,38 @@ function BubbleNode({ info, k, dim, hovered, setHovered, onClick,
 
   // ── Positions get a specialized treatment: OZ inside, name only on hover.
   if (n.kind === 'position') {
+    const vps = (window.positionPakete ? window.positionPakete(n.code) : []) || [];
+    let pf = fill, ps = stroke;
+    if (vps.length === 1) { pf = vps[0].soft; ps = vps[0].color; }
+    else if (vps.length > 1) { pf = 'var(--white)'; ps = 'var(--dim)'; }
+    const dotRow = vps.slice(0, 4);
+    const op = dim ? (hideMode === 'hide' ? 0.05 : 0.16) : 1;
     return (
       <g transform={`translate(${info.cx},${info.cy})`}
-         style={{ cursor: 'pointer', opacity: dim ? 0.16 : 1, transition: 'opacity .15s' }}
+         style={{ cursor: 'pointer', opacity: op, transition: 'opacity .15s',
+           pointerEvents: dim && hideMode === 'hide' ? 'none' : 'auto' }}
          onMouseEnter={() => setHovered(info.id)}
          onMouseLeave={() => setHovered(null)}
          onClick={(e) => { e.stopPropagation(); onClick && onClick(); }}>
-        <circle r={r} fill={fill} stroke={stroke}
+        <circle r={r} fill={pf} stroke={ps}
           strokeWidth={hovered ? 2 : 1.2}
           style={{
             filter: hovered ? 'drop-shadow(0 4px 12px rgba(37,99,235,0.22))' : 'none',
             transition: 'all .15s',
           }} />
         {showLabel && (
-          <text textAnchor="middle" y={3.5}
+          <text textAnchor="middle" y={dotRow.length > 1 ? 0 : 3.5}
             fontFamily="var(--mono)" fontSize="9" fontWeight="600" fill="var(--ink)">
             {n.code}
           </text>
+        )}
+        {showLabel && dotRow.length > 1 && (
+          <g transform={`translate(0,${Math.max(7, r * 0.42)})`}>
+            {dotRow.map((v, i) => {
+              const gap = 5; const x = (i - (dotRow.length - 1) / 2) * gap;
+              return <circle key={v.id} cx={x} cy={0} r={2.1} fill={v.color} stroke="#fff" strokeWidth="0.6" />;
+            })}
+          </g>
         )}
         {hovered && (() => {
           const label = truncate(n.label, 36);

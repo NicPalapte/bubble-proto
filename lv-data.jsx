@@ -262,3 +262,200 @@ function defaultNotes(id) {
 }
 
 Object.assign(window, { defaultNotes });
+
+// ══════════════════════════════════════════════════════════════
+// VERGABE — Vergabepakete · Nachunternehmer · Anfragen/Angebote · Dokumente
+// ══════════════════════════════════════════════════════════════
+
+// Index helpers over the LV (code → position, code → section)
+const POS_INDEX = new Map();
+const SEC_OF_POS = new Map();
+LV.sections.forEach(sec => sec.positions.forEach(p => {
+  POS_INDEX.set(p.code, p);
+  SEC_OF_POS.set(p.code, sec);
+}));
+
+// ── Vergabepaket colors: shared lightness/chroma, hue varies (oklch) ──
+function vpColors(h) {
+  return {
+    color:  `oklch(0.63 0.15 ${h})`,   // node fill / badge / dot
+    soft:   `oklch(0.955 0.028 ${h})`, // tints, chip backgrounds
+    mid:    `oklch(0.90 0.06 ${h})`,
+    border: `oklch(0.78 0.11 ${h})`,
+    ink:    `oklch(0.45 0.13 ${h})`,   // text on soft bg
+  };
+}
+
+const VERGABEPAKETE = [
+  { id:'vp-erdbau',  code:'VP-01', name:'Erd- & Gründungsarbeiten', hue:255,
+    positionCodes:['01.010','01.020','01.030','02.010','02.020','02.030'] },
+  { id:'vp-wand',    code:'VP-02', name:'Wände & Stützen',          hue:350,
+    positionCodes:['03.010','03.020','03.030','04.010','04.020','04.030'] },
+  { id:'vp-decken',  code:'VP-03', name:'Decken & Treppen',         hue:175,
+    positionCodes:['05.010','05.020','06.010','06.020','06.030'] },
+  { id:'vp-dach',    code:'VP-04', name:'Dach & Attika',            hue:70,
+    positionCodes:['07.010','07.020'] },
+  { id:'vp-sicht',   code:'VP-05', name:'Sichtbeton-Paket · Variante', hue:300,
+    positionCodes:['03.030','04.020'] },                 // overlaps VP-02
+  { id:'vp-spezial', code:'VP-06', name:'Spezialbeton WU/HS · Variante', hue:140,
+    positionCodes:['02.010','04.020'] },                 // overlaps VP-01 & VP-02
+].map(v => ({ ...v, ...vpColors(v.hue) }));
+
+const VP_BY_ID = Object.fromEntries(VERGABEPAKETE.map(v => [v.id, v]));
+
+// position code → array of Vergabepaket objects (consistent ordering = VP order)
+const POS_TO_VP = new Map();
+VERGABEPAKETE.forEach(vp => vp.positionCodes.forEach(code => {
+  if (!POS_TO_VP.has(code)) POS_TO_VP.set(code, []);
+  POS_TO_VP.get(code).push(vp);
+}));
+
+function positionPakete(code) { return POS_TO_VP.get(code) || []; }
+function paketById(id) { return VP_BY_ID[id] || null; }
+function paketPositions(paketId) {
+  const vp = VP_BY_ID[paketId];
+  if (!vp) return [];
+  return vp.positionCodes
+    .map(code => ({ p: POS_INDEX.get(code), sec: SEC_OF_POS.get(code) }))
+    .filter(x => x.p);
+}
+// LV estimate sum for a package (Σ menge × Schätz-EP)
+function paketLVSumme(paketId) {
+  return paketPositions(paketId).reduce((a, { p }) => a + (p.menge || 0) * (p.ep || 0), 0);
+}
+
+// ── Nachunternehmer (subcontractors) ──
+const NACHUNTERNEHMER = [
+  { id:'nu-betonbau', name:'Betonbau Süd GmbH',     gewerk:'Stahlbetonbau',     ort:'Augsburg' },
+  { id:'nu-huber',    name:'Huber Massivbau KG',    gewerk:'Rohbau',            ort:'Landsberg' },
+  { id:'nu-stein',    name:'Steinmann Erd- & Tiefbau', gewerk:'Erd- & Tiefbau', ort:'München' },
+  { id:'nu-vogel',    name:'Vogel Sichtbeton GmbH', gewerk:'Sichtbeton',        ort:'Ulm' },
+  { id:'nu-stahlpro', name:'StahlPro Bewehrung',    gewerk:'Bewehrungstechnik', ort:'Ingolstadt' },
+  { id:'nu-keller',   name:'Keller Bedachung',      gewerk:'Dachabdichtung',    ort:'Memmingen' },
+  { id:'nu-fink',     name:'Fink Treppenbau',       gewerk:'Fertigteile',       ort:'Kempten' },
+];
+const NU_BY_ID = Object.fromEntries(NACHUNTERNEHMER.map(n => [n.id, n]));
+
+// ── Anfragen / Angebote ──
+// status: 'angefragt' | 'angebot' (Angebot erhalten) | 'abgesagt' | 'vergeben'
+// `factor` synthesizes a line-item offer from the LV estimate EP (GAEB DA84 stand-in).
+// Only 'angebot' & 'vergeben' carry priced line items.
+const ANFRAGEN = [
+  // VP-01 Erd- & Gründung
+  { paketId:'vp-erdbau', nuId:'nu-stein',    status:'vergeben',  factor:0.965, datum:'2026-04-18' },
+  { paketId:'vp-erdbau', nuId:'nu-huber',    status:'angebot',   factor:1.042, datum:'2026-04-20' },
+  { paketId:'vp-erdbau', nuId:'nu-betonbau', status:'abgesagt',                datum:'2026-04-15' },
+  // VP-02 Wände & Stützen
+  { paketId:'vp-wand',   nuId:'nu-betonbau', status:'angebot',   factor:0.978, datum:'2026-04-28' },
+  { paketId:'vp-wand',   nuId:'nu-huber',    status:'angebot',   factor:1.015, datum:'2026-05-02' },
+  { paketId:'vp-wand',   nuId:'nu-stahlpro', status:'angefragt',               datum:'2026-05-04' },
+  // VP-03 Decken & Treppen
+  { paketId:'vp-decken', nuId:'nu-betonbau', status:'angebot',   factor:1.006, datum:'2026-05-06' },
+  { paketId:'vp-decken', nuId:'nu-fink',     status:'angebot',   factor:0.952, datum:'2026-05-08' },
+  { paketId:'vp-decken', nuId:'nu-huber',    status:'angefragt',               datum:'2026-05-09' },
+  // VP-04 Dach & Attika
+  { paketId:'vp-dach',   nuId:'nu-keller',   status:'vergeben',  factor:0.99,  datum:'2026-05-10' },
+  { paketId:'vp-dach',   nuId:'nu-betonbau', status:'abgesagt',                datum:'2026-05-07' },
+  // VP-05 Sichtbeton (Variante)
+  { paketId:'vp-sicht',  nuId:'nu-vogel',    status:'angebot',   factor:1.085, datum:'2026-05-12' },
+  { paketId:'vp-sicht',  nuId:'nu-betonbau', status:'angefragt',               datum:'2026-05-13' },
+  // VP-06 Spezialbeton (Variante)
+  { paketId:'vp-spezial',nuId:'nu-betonbau', status:'angebot',   factor:1.028, datum:'2026-05-14' },
+  { paketId:'vp-spezial',nuId:'nu-stahlpro', status:'angefragt',               datum:'2026-05-15' },
+];
+
+const ANFRAGE_STATUS = {
+  angefragt: { label:'Angefragt',        bg:'#eef2f7',       fg:'var(--dim)',    dot:'var(--mute)'  },
+  angebot:   { label:'Angebot erhalten', bg:'var(--blueS)',  fg:'var(--blueD)',  dot:'var(--blue)'  },
+  abgesagt:  { label:'Abgesagt',         bg:'#fee2e2',       fg:'#b91c1c',       dot:'#dc2626'      },
+  vergeben:  { label:'Vergeben',         bg:'var(--greenS)', fg:'var(--greenD)', dot:'var(--greenD)'},
+};
+
+function anfragenFor(paketId) { return ANFRAGEN.filter(a => a.paketId === paketId); }
+function anfragenOfNu(nuId)    { return ANFRAGEN.filter(a => a.nuId === nuId); }
+function nuPakete(nuId) {
+  return [...new Set(anfragenOfNu(nuId).map(a => a.paketId))].map(id => VP_BY_ID[id]).filter(Boolean);
+}
+
+// Line-item offer prices for one Anfrage: OZ → offered EP (rounded). GAEB-ready shape.
+function angebotPreise(anfrage) {
+  if (!anfrage || !anfrage.factor) return null;
+  const out = {};
+  paketPositions(anfrage.paketId).forEach(({ p }) => {
+    if (p.ep == null) return;
+    out[p.code] = Math.round(p.ep * anfrage.factor * 100) / 100;
+  });
+  return out;
+}
+// Total offer sum (Σ menge × offered EP)
+function angebotSumme(anfrage) {
+  const preise = angebotPreise(anfrage);
+  if (!preise) return null;
+  return paketPositions(anfrage.paketId)
+    .reduce((a, { p }) => a + (p.menge || 0) * (preise[p.code] ?? 0), 0);
+}
+// Offers that priced a specific position (for the Preisspiegel in the props panel)
+function angeboteForPosition(code) {
+  const vpIds = positionPakete(code).map(v => v.id);
+  const out = [];
+  ANFRAGEN.forEach(a => {
+    if (!vpIds.includes(a.paketId)) return;
+    const preise = angebotPreise(a);
+    if (preise && preise[code] != null) {
+      out.push({ nu: NU_BY_ID[a.nuId], paket: VP_BY_ID[a.paketId], status:a.status, ep: preise[code] });
+    }
+  });
+  return out;
+}
+
+// ── Pflichtdokumente (required compliance documents) ──
+// scope: 'firma' (company-level) | 'paket' (auftrags-/paketbezogen)
+const PFLICHTDOKUMENTE = [
+  { id:'frei48b',  scope:'firma', name:'Freistellungsbescheinigung §48b EStG', kurz:'§48b EStG' },
+  { id:'soka',     scope:'firma', name:'Unbedenklichkeitsbesch. SOKA-BAU',     kurz:'SOKA-BAU' },
+  { id:'bgbau',    scope:'firma', name:'Unbedenklichkeitsbesch. BG BAU',       kurz:'BG BAU' },
+  { id:'kk',       scope:'firma', name:'Unbedenklichkeitsbesch. Krankenkasse', kurz:'Krankenkasse' },
+  { id:'gewerbe',  scope:'firma', name:'Gewerbeanmeldung',                     kurz:'Gewerbe' },
+  { id:'haftpfl',  scope:'firma', name:'Betriebshaftpflicht-Nachweis',         kurz:'Haftpflicht' },
+  { id:'pq',       scope:'firma', name:'Präqualifikation (PQ-VOB)',            kurz:'PQ-VOB' },
+  { id:'versPaket',scope:'paket', name:'Auftragsbez. Versicherungsbestätigung',kurz:'Vers. (Paket)' },
+  { id:'eignung',  scope:'paket', name:'Eignungs-/Schweißnachweis (Paket)',    kurz:'Eignung (Paket)' },
+];
+
+// Per-NU overrides; everything else defaults to 'vorhanden' valid until 2027.
+// status: 'vorhanden' | 'fehlt' | 'abgelaufen' (abgelaufen carries a past gueltigBis)
+const NU_DOC_OVERRIDES = {
+  'nu-betonbau': {},                                                            // 9/9
+  'nu-huber':    { pq:'fehlt', haftpfl:{ status:'abgelaufen', gueltigBis:'2026-05-31' } }, // 7/9
+  'nu-stein':    { kk:{ status:'abgelaufen', gueltigBis:'2026-04-30' } },        // 8/9
+  'nu-vogel':    { pq:'fehlt', eignung:'fehlt' },                               // 7/9
+  'nu-stahlpro': { soka:{ status:'abgelaufen', gueltigBis:'2026-02-28' } },      // 8/9
+  'nu-keller':   { versPaket:'fehlt', frei48b:{ status:'abgelaufen', gueltigBis:'2026-05-15' } }, // 7/9
+  'nu-fink':     {},                                                            // 9/9
+};
+
+function nuDokumente(nuId) {
+  const ov = NU_DOC_OVERRIDES[nuId] || {};
+  return PFLICHTDOKUMENTE.map(doc => {
+    const o = ov[doc.id];
+    if (!o) return { ...doc, status:'vorhanden', gueltigBis:'2027-06-30' };
+    if (typeof o === 'string') return { ...doc, status:o, gueltigBis: o === 'fehlt' ? null : '2027-06-30' };
+    return { ...doc, status:o.status, gueltigBis:o.gueltigBis || null };
+  });
+}
+function nuDocStatus(nuId) {
+  const docs = nuDokumente(nuId);
+  const gueltig  = docs.filter(d => d.status === 'vorhanden').length;
+  const expired  = docs.filter(d => d.status === 'abgelaufen').length;
+  const missing  = docs.filter(d => d.status === 'fehlt').length;
+  return { docs, gueltig, total:docs.length, expired, missing, ok: expired === 0 && missing === 0 };
+}
+
+Object.assign(window, {
+  VERGABEPAKETE, VP_BY_ID, NACHUNTERNEHMER, NU_BY_ID, ANFRAGEN, ANFRAGE_STATUS,
+  PFLICHTDOKUMENTE,
+  positionPakete, paketById, paketPositions, paketLVSumme,
+  anfragenFor, anfragenOfNu, nuPakete,
+  angebotPreise, angebotSumme, angeboteForPosition,
+  nuDokumente, nuDocStatus,
+});

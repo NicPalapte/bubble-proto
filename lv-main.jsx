@@ -269,16 +269,152 @@ function Chip({ children, on, onClick, dashed, count }) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Vergabepaket color dots (tree rows / inline)
+// ─────────────────────────────────────────────────────────────
+function VpDots({ vps, max = 4 }) {
+  const list = (vps || []).filter(Boolean).slice(0, max);
+  if (list.length === 0) return null;
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+      {list.map((v) =>
+      <span key={v.id} title={`${v.code} · ${v.name}`}
+        style={{ width: 7, height: 7, borderRadius: '50%', background: v.color, border: `1px solid ${v.border}` }} />
+      )}
+    </span>);
+
+}
+
+// ─────────────────────────────────────────────────────────────
+// Active-filter strip — removable chips · Hervorheben/Ausblenden · reset
+// ─────────────────────────────────────────────────────────────
+function FilterStrip({ filters, setFilter, hideMode, setHideMode, onReset }) {
+  const chips = [];
+  FACETS.forEach((f) => {
+    const sel = filters[f.id];
+    if (sel instanceof Set && sel.size > 0) {
+      const vals = f.sortValues ? f.sortValues([...sel]) : [...sel];
+      vals.forEach((v) => chips.push({
+        facetId: f.id, value: v,
+        label: f.optionLabel ? f.optionLabel(v) : v,
+        color: f.swatch ? f.swatch(v) : null }));
+    }
+  });
+  if (filters.menge && Array.isArray(filters.menge)) {
+    chips.push({ facetId: 'menge', value: null,
+      label: `Menge ${filters.menge[0].toLocaleString('de-DE')}–${filters.menge[1].toLocaleString('de-DE')}`, color: null });
+  }
+  if (chips.length === 0) return null;
+  const remove = (facetId, value) => {
+    if (facetId === 'menge') { setFilter('menge', null); return; }
+    const next = new Set(filters[facetId]); next.delete(value);
+    setFilter(facetId, next);
+  };
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 16px',
+      background: 'var(--white)', borderBottom: '1px solid var(--line)', flexShrink: 0,
+      overflowX: 'auto', position: 'relative', zIndex: 4 }}>
+      <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: 'var(--mute)', letterSpacing: .6, flexShrink: 0 }}>AKTIVE FILTER</span>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'nowrap' }}>
+        {chips.map((c, i) =>
+        <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 6px 3px 9px',
+          border: `1px solid ${c.color || 'var(--line2)'}`, background: c.color ? 'var(--white)' : 'var(--paper)',
+          fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink)', whiteSpace: 'nowrap' }}>
+          {c.color && <span style={{ width: 8, height: 8, borderRadius: 2, background: c.color }} />}
+          {c.label}
+          <span onClick={() => remove(c.facetId, c.value)} style={{ cursor: 'pointer', color: 'var(--mute)', fontSize: 11, lineHeight: 1 }}>✕</span>
+        </span>
+        )}
+      </div>
+      <span style={{ flex: 1 }} />
+      <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: 'var(--mute)', letterSpacing: .6, flexShrink: 0 }}>NICHT-TREFFER</span>
+      <div style={{ display: 'flex', border: '1px solid var(--line)', flexShrink: 0 }}>
+        {[['dim', 'Hervorheben'], ['hide', 'Ausblenden']].map(([m, lbl], i) => {
+          const on = hideMode === m;
+          return (
+            <span key={m} onClick={() => setHideMode(m)} style={{
+              padding: '4px 10px', cursor: 'pointer', fontFamily: 'var(--mono)', fontSize: 9.5,
+              background: on ? 'var(--blueS)' : 'var(--white)', color: on ? 'var(--blueD)' : 'var(--dim)',
+              borderLeft: i > 0 ? '1px solid var(--line)' : 'none', fontWeight: on ? 500 : 400 }}>{lbl}</span>);
+        })}
+      </div>
+      <Chip dashed onClick={onReset}>✕ Zurücksetzen</Chip>
+    </div>);
+
+}
+
+// ─────────────────────────────────────────────────────────────
+// Position properties: Vergabepakete + Preisspiegel (NU offered EP)
+// ─────────────────────────────────────────────────────────────
+function PosVergabe({ p }) {
+  const vps = window.positionPakete ? window.positionPakete(p.code) : [];
+  if (vps.length === 0) return null;
+  const offers = (window.angeboteForPosition ? window.angeboteForPosition(p.code) : []).slice().sort((a, b) => a.ep - b.ep);
+  const lo = offers.length ? offers[0].ep : null;
+  return (
+    <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--grid)' }}>
+      <div style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: .6, color: 'var(--mute)', marginBottom: 6 }}>VERGABEPAKETE</div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+        {vps.map((v) =>
+        <span key={v.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 9px',
+          background: v.soft, border: `1px solid ${v.border}`, color: v.ink, fontFamily: 'var(--mono)', fontSize: 10 }}>
+          <span style={{ width: 8, height: 8, borderRadius: 2, background: v.color }} />
+          {v.code} · {v.name}
+        </span>
+        )}
+      </div>
+      <div style={{ marginTop: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: .6, color: 'var(--mute)' }}>PREISSPIEGEL</span>
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 8.5, color: 'var(--mute)' }}>EP · {offers.length} Angebot(e)</span>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 8px', background: 'var(--panel)',
+        border: '1px solid var(--grid)', fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--dim)' }}>
+        <span>LV-Schätzung</span>
+        <span style={{ color: 'var(--ink)' }}>{p.ep != null ? p.ep.toLocaleString('de-DE', { minimumFractionDigits: 2 }) + ' €' : '—'}</span>
+      </div>
+      {offers.length === 0 &&
+      <div style={{ padding: '8px', textAlign: 'center', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--mute)' }}>Noch keine Angebote.</div>
+      }
+      {offers.map((o, i) => {
+        const delta = p.ep != null ? (o.ep - p.ep) / p.ep * 100 : null;
+        const best = o.ep === lo;
+        return (
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 8px',
+            borderBottom: '1px solid var(--grid)', background: best ? 'var(--greenS)' : 'transparent' }}>
+            <span style={{ width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
+              background: (window.ANFRAGE_STATUS[o.status] || {}).dot || 'var(--mute)' }} />
+            <span style={{ flex: 1, minWidth: 0, fontFamily: 'var(--sans)', fontSize: 11, color: 'var(--ink)',
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{o.nu.name}</span>
+            {best && <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: 'var(--greenD)', border: '1px solid var(--greenD)', padding: '0 4px' }}>günstigst</span>}
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink)' }}>{o.ep.toLocaleString('de-DE', { minimumFractionDigits: 2 })} €</span>
+            {delta != null && <span style={{ fontFamily: 'var(--mono)', fontSize: 9, width: 44, textAlign: 'right', color: delta > 0 ? '#b91c1c' : 'var(--greenD)' }}>{delta > 0 ? '+' : ''}{delta.toFixed(1)}%</span>}
+          </div>);
+      })}
+    </div>);
+
+}
+
+// ─────────────────────────────────────────────────────────────
 // Faceted filter — dynamic, generated from data
 // ─────────────────────────────────────────────────────────────
 // A filter is { facetId: Set(values) }. Each facet has:
 //   id, label, getValues(p)→string[], (optional) sort, (optional) render
 const FACETS = [
+{ id: 'paket', label: 'Vergabepaket',
+  get: (p) => window.positionPakete ? window.positionPakete(p.code).map((v) => v.id) : [],
+  optionLabel: (id) => { const v = window.VP_BY_ID && window.VP_BY_ID[id]; return v ? `${v.code} · ${v.name}` : id; },
+  swatch: (id) => window.VP_BY_ID && window.VP_BY_ID[id] ? window.VP_BY_ID[id].color : null,
+  sortValues: (vals) => { const ord = (window.VERGABEPAKETE || []).map((v) => v.id); return [...vals].sort((a, b) => ord.indexOf(a) - ord.indexOf(b)); } },
+{ id: 'nu', label: 'Nachunternehmer',
+  get: (p) => {
+    if (!window.positionPakete || !window.anfragenFor) return [];
+    const ids = new Set();
+    window.positionPakete(p.code).forEach((v) => window.anfragenFor(v.id).forEach((a) => ids.add(a.nuId)));
+    return [...ids];
+  },
+  optionLabel: (id) => window.NU_BY_ID && window.NU_BY_ID[id] ? window.NU_BY_ID[id].name : id },
 { id: 'status', label: 'Status', get: (p) => [p.status] },
 { id: 'beton', label: 'Druckfestigkeit', get: (p) => p.beton ? [p.beton] : [] },
-{ id: 'expo', label: 'Exposition', get: (p) => p.expo || [] },
-{ id: 'einheit', label: 'Einheit', get: (p) => p.einheit ? [p.einheit] : [] },
-{ id: 'tragend', label: 'Tragend', get: (p) => p.tragend === true ? ['tragend'] : p.tragend === false ? ['nicht tragend'] : [] }];
+{ id: 'einheit', label: 'Einheit', get: (p) => p.einheit ? [p.einheit] : [] }];
 
 
 function FacetButton({ facet, allPositions, active, setActive }) {
@@ -290,7 +426,7 @@ function FacetButton({ facet, allPositions, active, setActive }) {
     allPositions.forEach((p) => facet.get(p).forEach((v) => m.set(v, (m.get(v) || 0) + 1)));
     return m;
   }, [allPositions, facet]);
-  const values = [...counts.keys()].sort();
+  const values = facet.sortValues ? facet.sortValues([...counts.keys()]) : [...counts.keys()].sort();
 
   useEffect(() => {
     if (!open) return;
@@ -315,7 +451,7 @@ function FacetButton({ facet, allPositions, active, setActive }) {
       {open &&
       <div style={{
         position: 'absolute', top: 'calc(100% + 6px)', left: 0, zIndex: 50,
-        minWidth: 200, background: 'var(--white)', border: '1px solid var(--line2)',
+        minWidth: 244, maxWidth: 320, background: 'var(--white)', border: '1px solid var(--line2)',
         boxShadow: '0 8px 24px rgba(26,37,51,0.10)',
         fontFamily: 'var(--mono)', fontSize: 10
       }}>
@@ -348,8 +484,9 @@ function FacetButton({ facet, allPositions, active, setActive }) {
                   color: '#fff', fontSize: 9, lineHeight: 1
                 }}>{on ? '✓' : ''}</span>
                   {facet.id === 'status' ? <Status s={v} dotOnly /> : null}
-                  <span style={{ flex: 1 }}>{v}</span>
-                  <span style={{ color: 'var(--mute)' }}>{counts.get(v)}</span>
+                  {facet.swatch && facet.swatch(v) ? <span style={{ width: 11, height: 11, borderRadius: 2, background: facet.swatch(v), flexShrink: 0 }} /> : null}
+                  <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={facet.optionLabel ? facet.optionLabel(v) : v}>{facet.optionLabel ? facet.optionLabel(v) : v}</span>
+                  <span style={{ color: 'var(--mute)', flexShrink: 0 }}>{counts.get(v)}</span>
                 </div>);
 
           })}
@@ -560,7 +697,7 @@ function TopBar({ breadcrumb, search, setSearch, filters, setFilter, allPosition
 // Left tree — slim, search included, filter-aware, collapsible
 // ─────────────────────────────────────────────────────────────
 function Tree({ width, collapsed, setCollapsed, selSection, selPos, view, setView,
-  notes, tasks, onSection, onPos, onRoot, filters, globalSearch }) {
+  notes, tasks, onSection, onPos, onRoot, filters, globalSearch, hideMode }) {
   const q = (globalSearch || '').trim();
   const [openIds, setOpenIds] = useState(new Set(LV.sections.map((s) => s.id)));
   const toggle = (id) => setOpenIds((o) => {const n = new Set(o);n.has(id) ? n.delete(id) : n.add(id);return n;});
@@ -580,10 +717,15 @@ function Tree({ width, collapsed, setCollapsed, selSection, selPos, view, setVie
     }
     const betonSet = new Set();
     LV.sections.forEach((sec) => sec.positions.forEach((p) => {if (p.beton) betonSet.add(p.beton);}));
-    return { bf, openTasks, beton: betonSet.size };
+    const vpCount = (window.VERGABEPAKETE || []).length;
+    let nuWarn = 0;
+    (window.NACHUNTERNEHMER || []).forEach((n) => { const s = window.nuDocStatus(n.id); if ((s.expired + s.missing) > 0) nuWarn++; });
+    return { bf, openTasks, beton: betonSet.size, vp: vpCount, nuWarn };
   }, [notes, tasks]);
 
   const NAV = [
+  { id: 'vp', label: 'Vergabepakete', icon: '▣', count: navCounts.vp, countColor: 'var(--blueD)' },
+  { id: 'nu', label: 'Nachunternehmer', icon: '⊞', count: navCounts.nuWarn, countColor: '#dc2626' },
   { id: 'bf', label: 'Bieterfragen', icon: '?', count: navCounts.bf, countColor: '#7c3aed' },
   { id: 'tasks', label: 'Aufgaben', icon: '✓', count: navCounts.openTasks, countColor: 'var(--amber)' },
   { id: 'beton', label: 'Beton-Verzeichnis', icon: '◆', count: navCounts.beton, countColor: 'var(--blueD)' }];
@@ -735,18 +877,21 @@ function Tree({ width, collapsed, setCollapsed, selSection, selPos, view, setVie
 
       <div style={{ flex: 1, overflow: 'auto', padding: '4px 0' }}>
         {LV.sections.map((sec) => {
-          const matchingPos = sec.positions.filter((p) => matchPos(p, filters, globalSearch));
-          const treeFilteredPos = matchingPos.filter((p) => treeMatches(p.label) || treeMatches(p.code));
-          const secMatch = treeMatches(sec.label) || treeMatches(sec.code);
-          // Auto-expand sections that contain matches when the user is searching.
-          const open = openIds.has(sec.id) || !!q && treeFilteredPos.length > 0;
-          const filtersActive = Object.values(filters).some((v) =>
+          const facetMatch = (p) => matchPos(p, filters, '');
+          const facetsActive = Object.values(filters).some((v) =>
           v instanceof Set && v.size > 0 || Array.isArray(v));
-          // Hide entirely when any filter or the global search is active and the
-          // section has nothing to show — otherwise just dim.
-          if ((filtersActive || q) && matchingPos.length === 0 && !secMatch) return null;
-          if (q && !secMatch && treeFilteredPos.length === 0) return null;
-          const dimSec = matchingPos.length === 0;
+          const secMatch = treeMatches(sec.label) || treeMatches(sec.code);
+          // Text search always narrows candidates (hides non-text matches).
+          const candidates = q ? sec.positions.filter((p) => treeMatches(p.label) || treeMatches(p.code)) : sec.positions;
+          if (q && !secMatch && candidates.length === 0) return null;
+          const facetCount = candidates.filter(facetMatch).length;
+          // Facet filter: 'hide' removes empty sections; 'dim' keeps + dims.
+          if (hideMode === 'hide' && facetsActive && facetCount === 0 && !secMatch) return null;
+          const display = hideMode === 'hide' && facetsActive ? candidates.filter(facetMatch) : candidates;
+          const open = openIds.has(sec.id) || !!q && display.length > 0;
+          const dimSec = facetsActive && facetCount === 0;
+          const secVps = window.positionPakete ?
+          [...new Set(sec.positions.flatMap((p) => window.positionPakete(p.code).map((v) => v.id)))].map((id) => window.VP_BY_ID[id]) : [];
           return (
             <div key={sec.id} style={{ opacity: dimSec ? 0.4 : 1 }}>
               <div onClick={() => {toggle(sec.id);onSection(sec.id);}}
@@ -761,29 +906,36 @@ function Tree({ width, collapsed, setCollapsed, selSection, selPos, view, setVie
                 <span style={{ width: 10, color: 'var(--mute)', fontSize: 9 }}>{open ? '▾' : '▸'}</span>
                 <span style={{ color: 'var(--mute)', fontSize: 10, width: 22 }}>{sec.code}</span>
                 <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontWeight: 500 }}>{sec.label}</span>
+                <VpDots vps={secVps} max={4} />
                 <Status s={sec.status} dotOnly />
                 <span style={{ color: 'var(--mute)', fontSize: 9, fontFamily: 'var(--mono)',
                   minWidth: 32, textAlign: 'right' }}>
-                  {matchingPos.length !== sec.positions.length ?
-                  <><span style={{ color: 'var(--blueD)' }}>{matchingPos.length}</span>/{sec.positions.length}</> :
+                  {facetsActive && facetCount !== sec.positions.length ?
+                  <><span style={{ color: 'var(--blueD)' }}>{facetCount}</span>/{sec.positions.length}</> :
                   sec.positions.length}
                 </span>
               </div>
-              {open && treeFilteredPos.map((p) =>
-              <div key={p.code} onClick={(e) => {e.stopPropagation();onPos(sec.id, p.code);}}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 6, padding: '4px 12px 4px 28px',
-                borderLeft: selPos === p.code ? '2px solid var(--blue)' : '2px solid transparent',
-                background: selPos === p.code ? 'var(--blueS)' : 'transparent',
-                fontFamily: 'var(--mono)', fontSize: 10.5,
-                color: selPos === p.code ? 'var(--blueD)' : 'var(--ink)',
-                cursor: 'pointer'
-              }}>
-                  <span style={{ color: 'var(--mute)', fontSize: 10, width: 44 }}>{p.code}</span>
-                  <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.label}</span>
-                  <Status s={p.status} dotOnly />
-                </div>
-              )}
+              {open && display.map((p) => {
+                const pDim = facetsActive && !facetMatch(p);
+                const pvps = window.positionPakete ? window.positionPakete(p.code) : [];
+                return (
+                  <div key={p.code} onClick={(e) => {e.stopPropagation();onPos(sec.id, p.code);}}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 6, padding: '4px 12px 4px 18px',
+                    borderLeft: selPos === p.code ? '2px solid var(--blue)' : `2px solid ${pvps[0] ? pvps[0].color : 'transparent'}`,
+                    background: selPos === p.code ? 'var(--blueS)' : 'transparent',
+                    fontFamily: 'var(--mono)', fontSize: 10.5,
+                    color: selPos === p.code ? 'var(--blueD)' : 'var(--ink)',
+                    opacity: pDim ? 0.32 : 1,
+                    cursor: 'pointer'
+                  }}>
+                    <VpDots vps={pvps} max={4} />
+                    <span style={{ color: 'var(--mute)', fontSize: 10, width: 42 }}>{p.code}</span>
+                    <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.label}</span>
+                    <Status s={p.status} dotOnly />
+                  </div>);
+
+              })}
             </div>);
 
         })}
@@ -960,6 +1112,8 @@ function PropsPanel({ width, section, position, assignees, tasks, notes }) {
         </div>
 
         <div style={{ flex: 1, overflow: 'auto' }}>
+          {/* VERGABE + PREISSPIEGEL */}
+          <PosVergabe p={p} />
           {/* BEARBEITER */}
           <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--grid)' }}>
             <AssigneePicker id={p.code} assignees={assignees} />
@@ -1252,6 +1406,8 @@ function App() {
   useEffect(() => localStorage.setItem('bubble-sizeMode', sizeMode), [sizeMode]);
   const [demoEnabled, setDemoEnabled] = useState(() => localStorage.getItem('bubble-demo') === '1');
   useEffect(() => localStorage.setItem('bubble-demo', demoEnabled ? '1' : '0'), [demoEnabled]);
+  const [hideMode, setHideMode] = useState(() => localStorage.getItem('bubble-hideMode') || 'dim');
+  useEffect(() => localStorage.setItem('bubble-hideMode', hideMode), [hideMode]);
 
   const assignees = useAssignees();
   const tasks = useTasks();
@@ -1324,6 +1480,11 @@ function App() {
         filters={filters} setFilter={setFilter} onReset={resetFilters}
         allPositions={allPositions}
         analyticsMode={view !== 'lv'} />
+
+      {view === 'lv' &&
+      <FilterStrip filters={filters} setFilter={setFilter}
+        hideMode={hideMode} setHideMode={setHideMode} onReset={resetFilters} />
+      }
       
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
         <Tree
@@ -1335,7 +1496,7 @@ function App() {
           onSection={(id) => {setView('lv');setSelSection(id);setSelPos(null);}}
           onPos={(sid, code) => {setView('lv');setSelSection(sid);setSelPos(code);}}
           onRoot={() => {setView('lv');setSelSection(null);setSelPos(null);}}
-          filters={filters} globalSearch={search} />
+          filters={filters} globalSearch={search} hideMode={hideMode} />
         
         {!treeCollapsed &&
         <ResizeHandle value={leftW} setValue={setLeftW} min={180} max={460} />
@@ -1349,6 +1510,12 @@ function App() {
           }
           {view === 'beton' &&
           <BetonView onPick={jumpToPos} />
+          }
+          {view === 'vp' &&
+          <VergabepaketeView onPick={jumpToPos} />
+          }
+          {view === 'nu' &&
+          <NachunternehmerView onPick={jumpToPos} />
           }
           {view === 'lv' && (sectionObj ?
           <PositionsTable
@@ -1369,7 +1536,7 @@ function App() {
               tasks={tasks}
               sizeMode={sizeMode}
               filters={filters} search={search}
-              demoEnabled={demoEnabled} setDemoEnabled={setDemoEnabled} />
+              demoEnabled={demoEnabled} setDemoEnabled={setDemoEnabled} hideMode={hideMode} />
               <CenterHint count={LV.sections.length}
             sizeMode={sizeMode} setSizeMode={setSizeMode}
             demoEnabled={demoEnabled} lotCount={LOTS.length} />

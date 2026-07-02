@@ -75,6 +75,22 @@ const LABEL_K = {
   doc: 0.6, cluster: 0.35,
 };
 
+// Health palette — grey (draft) / green (checked, nothing open) / orange (open points)
+const HEALTH_COLORS = {
+  green:  { fill: 'var(--greenS)', stroke: 'var(--greenD)' },
+  orange: { fill: '#fff4dc',       stroke: 'var(--amber)'  },
+  grey:   { fill: '#f1f4f8',       stroke: 'var(--mute)'   },
+};
+
+// Unique Vergabepaket ids under a node (section → its positions; lot → its sections)
+function nodeVpIds(n) {
+  const ids = new Set();
+  const add = (code) => (window.positionPakete ? window.positionPakete(code) : []).forEach((v) => ids.add(v.id));
+  if (n.kind === 'section' && n.data) n.data.positions.forEach((p) => add(p.code));
+  else if (n.kind === 'lot') (n.children || []).forEach((c) => { if (c.data) c.data.positions.forEach((p) => add(p.code)); });
+  return ids;
+}
+
 // ─────────────────────────────────────────────────────────────
 // Demo data — proves scale (5 levels, ~3000 positions)
 // ─────────────────────────────────────────────────────────────
@@ -288,6 +304,7 @@ function Bubbles(props) {
     hovered, setHovered,
     onPick,           // (sectionId, positionCode?) → drill to table
     tasks,
+    notes,
     demoEnabled, setDemoEnabled,
     sizeMode = 'count',
     filters = {},
@@ -536,6 +553,40 @@ function Bubbles(props) {
     return matchFn(info.node.data, filters, search);
   }, [filters, search]);
 
+  // ── Health map: grey (draft) / green (checked + nothing open) / orange (open points).
+  //    "Open points" = open tasks + notes not marked erledigt, on the node and its positions.
+  const healthMap = useMemo(() => {
+    const map = new Map();
+    const openFor = (id) => {
+      let n = 0;
+      if (tasks) n += tasks.getFor(id).filter((t) => !t.done).length;
+      if (notes) n += notes.getFor(id).filter((x) => x.status !== 'erledigt').length;
+      return n;
+    };
+    const rate = (status, open) =>
+      status === 'entwurf' ? 'grey' :
+      (status === 'geprüft' && open === 0) ? 'green' : 'orange';
+    sections.forEach((sec) => {
+      let open = openFor(sec.id);
+      sec.positions.forEach((p) => {
+        open += openFor(p.code);
+        map.set(`pos:${p.code}`, rate(p.status, openFor(p.code)));
+      });
+      map.set(sec.id, rate(sec.status, open));
+    });
+    const agg = (healths) =>
+      healths.some((h) => h === 'orange') ? 'orange' :
+      healths.some((h) => h === 'green') ? 'green' : 'grey';
+    LOTS.forEach((lot) => {
+      if (!lot.sectionIds.length) { map.set(lot.id, 'grey'); return; }
+      map.set(lot.id, agg(lot.sectionIds.map((id) => map.get(id)).filter(Boolean)));
+    });
+    map.set('project', agg(LOTS.map((l) => map.get(l.id)).filter(Boolean)));
+    return map;
+  }, [sections, tasks, notes]);
+
+  const vpFilter = (filters.paket instanceof Set && filters.paket.size) ? filters.paket : null;
+
   // ── Collapse-all (everything below the project)
   const collapseAll = useCallback(() => {
     const next = {};
@@ -783,6 +834,8 @@ function Bubbles(props) {
                 openTasks={openTasks}
                 rOverride={mi?.r}
                 hideMode={hideMode}
+                health={healthMap.get(info.id)}
+                vpFilter={vpFilter}
                 subLabel={mi?.sub} />
             );
           })}
@@ -810,29 +863,40 @@ function Bubbles(props) {
 // ─────────────────────────────────────────────────────────────
 
 function BubbleNode({ info, k, dim, hovered, setHovered, onClick,
-  collapsible, isCollapsed, childCount, onToggleCollapse, openTasks, rOverride, subLabel, hideMode = 'dim' }) {
+  collapsible, isCollapsed, childCount, onToggleCollapse, openTasks, rOverride, subLabel, hideMode = 'dim', health, vpFilter }) {
   const n = info.node;
   const r = rOverride != null ? rOverride : (RADII[n.kind] || 14);
   const showLabel = k >= (LABEL_K[n.kind] || 0.5);
 
-  // Color by kind + status
+  // Color by kind + health/status
   let fill = 'var(--white)', stroke = 'var(--line2)';
   if (n.kind === 'project') {
     fill = 'var(--white)'; stroke = 'var(--ink)';
+  } else if (health && HEALTH_COLORS[health] && (n.kind === 'section' || n.kind === 'lot')) {
+    fill = HEALTH_COLORS[health].fill; stroke = HEALTH_COLORS[health].stroke;
   } else if (n.kind === 'lot') {
     fill = n.empty ? '#f1f4f8' : 'var(--blueS)';
     stroke = n.empty ? 'var(--line2)' : 'var(--blue)';
   } else {
-    if (n.status === 'geprüft') { fill = 'var(--blueS)'; stroke = 'var(--blue)'; }
+    if (n.status === 'geprüft') { fill = 'var(--greenS)'; stroke = 'var(--greenD)'; }
     else if (n.status === 'offen') { fill = '#fff4dc'; stroke = 'var(--amber)'; }
     else { fill = '#f1f4f8'; stroke = 'var(--mute)'; }
   }
   const interactive = (n.kind === 'section' || n.kind === 'position');
 
+  // VP echo on section/lot bubbles when the paket filter is active
+  let vpDots = [];
+  if (vpFilter && (n.kind === 'section' || n.kind === 'lot')) {
+    const ids = nodeVpIds(n);
+    const list = (window.VERGABEPAKETE || []).filter((v) => ids.has(v.id) && vpFilter.has(v.id));
+    if (list.length) { stroke = list[0].color; vpDots = list.slice(0, 6); }
+  }
+
   // ── Positions get a specialized treatment: OZ inside, name only on hover.
   if (n.kind === 'position') {
     const vps = (window.positionPakete ? window.positionPakete(n.code) : []) || [];
     let pf = fill, ps = stroke;
+    if (health && HEALTH_COLORS[health]) { pf = HEALTH_COLORS[health].fill; ps = HEALTH_COLORS[health].stroke; }
     if (vps.length === 1) { pf = vps[0].soft; ps = vps[0].color; }
     else if (vps.length > 1) { pf = 'var(--white)'; ps = 'var(--dim)'; }
     const dotRow = vps.slice(0, 4);
@@ -927,6 +991,15 @@ function BubbleNode({ info, k, dim, hovered, setHovered, onClick,
               fill="var(--dim)">{subLabel}</text>
           )}
         </>
+      )}
+
+      {vpDots.length > 0 && showLabel && (
+        <g transform={`translate(0,${-r * 0.5})`}>
+          {vpDots.map((v, i) => {
+            const gap = 6; const x = (i - (vpDots.length - 1) / 2) * gap;
+            return <circle key={v.id} cx={x} cy={0} r={2.4} fill={v.color} stroke="#fff" strokeWidth="0.7" />;
+          })}
+        </g>
       )}
 
       {openTasks > 0 && (

@@ -162,7 +162,15 @@ function defaultTasks(id) {
   return T[id] || [];
 }
 
-Object.assign(window, { TEAM, defaultAssignee, defaultTasks });
+// Live assignee lookup mirroring useAssignees — lets the pure filter/matchPos
+// path resolve a position's responsible person without React state.
+function assigneeFor(id) {
+  const m = (typeof window !== 'undefined' && window.__assignees) || null;
+  if (m && m[id]) return m[id];
+  return defaultAssignee(id);
+}
+
+Object.assign(window, { TEAM, defaultAssignee, defaultTasks, assigneeFor });
 
 // ──────────────────────────────────────────────────────────────
 // Seed notes — includes Bieterfragen, Hinweise, Klärungen, Risiken

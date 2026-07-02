@@ -56,6 +56,9 @@ function useLocalStore(key, fallback) {
 
 function useAssignees() {
   const [m, setM] = useLocalStore('bubble-assignees', {});
+  // Mirror to window so window.assigneeFor (used by the pure filter path) stays live.
+  if (typeof window !== 'undefined' && !window.__assignees) window.__assignees = m;
+  useEffect(() => { window.__assignees = m; }, [m]);
   return {
     getFor: (id) => m[id] || defaultAssignee(id),
     setFor: (id, who) => setM((o) => ({ ...o, [id]: who }))
@@ -412,6 +415,10 @@ const FACETS = [
     return [...ids];
   },
   optionLabel: (id) => window.NU_BY_ID && window.NU_BY_ID[id] ? window.NU_BY_ID[id].name : id },
+{ id: 'bearb', label: 'Verantwortlich',
+  get: (p) => window.assigneeFor ? [window.assigneeFor(p.code)] : [],
+  optionLabel: (id) => { const t = (window.TEAM || []).find((x) => x.id === id); return t ? `${t.name} · ${t.role}` : id; },
+  sortValues: (vals) => { const ord = (window.TEAM || []).map((t) => t.id); return [...vals].sort((a, b) => ord.indexOf(a) - ord.indexOf(b)); } },
 { id: 'status', label: 'Status', get: (p) => [p.status] },
 { id: 'beton', label: 'Druckfestigkeit', get: (p) => p.beton ? [p.beton] : [] },
 { id: 'einheit', label: 'Einheit', get: (p) => p.einheit ? [p.einheit] : [] }];
@@ -484,6 +491,7 @@ function FacetButton({ facet, allPositions, active, setActive }) {
                   color: '#fff', fontSize: 9, lineHeight: 1
                 }}>{on ? '✓' : ''}</span>
                   {facet.id === 'status' ? <Status s={v} dotOnly /> : null}
+                  {facet.id === 'bearb' ? <Member id={v} size={16} /> : null}
                   {facet.swatch && facet.swatch(v) ? <span style={{ width: 11, height: 11, borderRadius: 2, background: facet.swatch(v), flexShrink: 0 }} /> : null}
                   <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={facet.optionLabel ? facet.optionLabel(v) : v}>{facet.optionLabel ? facet.optionLabel(v) : v}</span>
                   <span style={{ color: 'var(--mute)', flexShrink: 0 }}>{counts.get(v)}</span>
@@ -723,12 +731,13 @@ function Tree({ width, collapsed, setCollapsed, selSection, selPos, view, setVie
     return { bf, openTasks, beton: betonSet.size, vp: vpCount, nuWarn };
   }, [notes, tasks]);
 
+  // Counts are neutral by default; only genuine "needs attention" states carry a single accent.
   const NAV = [
-  { id: 'vp', label: 'Vergabepakete', icon: '▣', count: navCounts.vp, countColor: 'var(--blueD)' },
-  { id: 'nu', label: 'Nachunternehmer', icon: '⊞', count: navCounts.nuWarn, countColor: '#dc2626' },
-  { id: 'bf', label: 'Bieterfragen', icon: '?', count: navCounts.bf, countColor: '#7c3aed' },
-  { id: 'tasks', label: 'Aufgaben', icon: '✓', count: navCounts.openTasks, countColor: 'var(--amber)' },
-  { id: 'beton', label: 'Beton-Verzeichnis', icon: '◆', count: navCounts.beton, countColor: 'var(--blueD)' }];
+  { id: 'vp', label: 'Vergabepakete', icon: '▣', count: navCounts.vp },
+  { id: 'nu', label: 'Nachunternehmer', icon: '⊞', count: navCounts.nuWarn, warn: true },
+  { id: 'bf', label: 'Bieterfragen', icon: '?', count: navCounts.bf, warn: true },
+  { id: 'tasks', label: 'Aufgaben', icon: '✓', count: navCounts.openTasks, warn: true },
+  { id: 'beton', label: 'Beton-Verzeichnis', icon: '◆', count: navCounts.beton }];
 
 
   // ── COLLAPSED: icon rail
@@ -757,7 +766,7 @@ function Tree({ width, collapsed, setCollapsed, selSection, selPos, view, setVie
               {n.count > 0 &&
               <span style={{ position: 'absolute', top: 4, right: 4,
                 minWidth: 14, height: 14, padding: '0 3px',
-                background: n.countColor, color: '#fff',
+                background: n.warn ? 'var(--amber)' : 'var(--dim)', color: '#fff',
                 fontFamily: 'var(--mono)', fontSize: 8, fontWeight: 600,
                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 7
               }}>{n.count}</span>
@@ -808,13 +817,36 @@ function Tree({ width, collapsed, setCollapsed, selSection, selPos, view, setVie
   return (
     <div style={{ width, background: 'var(--white)', borderRight: '1px solid var(--line)',
       display: 'flex', flexDirection: 'column', flexShrink: 0, overflow: 'hidden' }}>
-      <div style={{ padding: '8px 8px', borderBottom: '1px solid var(--line)', background: 'var(--paper)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '2px 4px 6px' }}>
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: .6, color: 'var(--mute)',
-            textTransform: 'uppercase' }}>Analytik</span>
+      {/* PROJECT header — prominent; click to return to bubble overview */}
+      <div style={{ padding: '10px 12px 11px', borderBottom: '1px solid var(--line)', background: 'var(--paper)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 5 }}>
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 8.5, letterSpacing: .6, color: 'var(--mute)',
+            textTransform: 'uppercase' }}>Projekt</span>
           <span onClick={() => setCollapsed(true)} title="Einklappen"
           style={{ cursor: 'pointer', color: 'var(--dim)', fontFamily: 'var(--mono)', fontSize: 13,
-            padding: '0 6px', lineHeight: 1 }}>‹</span>
+            padding: '0 2px', lineHeight: 1 }}>‹</span>
+        </div>
+        <div onClick={onRoot} style={{ cursor: 'pointer',
+          borderLeft: view === 'lv' && !selSection ? '2px solid var(--blue)' : '2px solid transparent',
+          paddingLeft: 8, marginLeft: -2 }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 7 }}>
+            <span style={{ fontFamily: 'var(--sans)', fontSize: 15, fontWeight: 700,
+              color: view === 'lv' && !selSection ? 'var(--blueD)' : 'var(--ink)',
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{LV.project}</span>
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--dim)', flexShrink: 0,
+              border: '1px solid var(--line2)', padding: '0 4px', lineHeight: '15px' }}>{LV.version}</span>
+          </div>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--mute)', marginTop: 3 }}>
+            Übersicht · {LV.sections.length} Abschnitte
+          </div>
+        </div>
+      </div>
+
+      {/* ANALYTIK block */}
+      <div style={{ padding: '8px 8px', borderBottom: '1px solid var(--line)', background: 'var(--paper)' }}>
+        <div style={{ padding: '2px 4px 6px' }}>
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: .6, color: 'var(--mute)',
+            textTransform: 'uppercase' }}>Analytik</span>
         </div>
         {NAV.map((n) => {
           const on = view === n.id;
@@ -836,39 +868,13 @@ function Tree({ width, collapsed, setCollapsed, selSection, selPos, view, setVie
               {n.count > 0 &&
               <span style={{
                 padding: '1px 6px', minWidth: 18, textAlign: 'center',
-                background: n.countColor, color: '#fff',
+                background: n.warn ? 'var(--amber)' : '#eef2f7', color: n.warn ? '#fff' : 'var(--dim)',
                 fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 600, letterSpacing: .2
               }}>{n.count}</span>
               }
             </div>);
 
         })}
-      </div>
-
-      {/* ROOT ROW — click to return to bubble overview */}
-      <div onClick={onRoot} style={{
-        display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px',
-        borderBottom: '1px solid var(--grid)', cursor: 'pointer',
-        borderLeft: view === 'lv' && !selSection ? '2px solid var(--blue)' : '2px solid transparent',
-        background: view === 'lv' && !selSection ? 'var(--blueS)' : 'transparent'
-      }}>
-        <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          width: 18, height: 18, borderRadius: '50%',
-          border: view === 'lv' && !selSection ? '1.5px solid var(--blue)' : '1.5px solid var(--line2)',
-          background: 'var(--white)' }}>
-          <span style={{ width: 6, height: 6, borderRadius: '50%',
-            background: view === 'lv' && !selSection ? 'var(--blue)' : 'var(--line2)' }} />
-        </span>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontFamily: 'var(--sans)', fontSize: 11, fontWeight: 600,
-            color: view === 'lv' && !selSection ? 'var(--blueD)' : 'var(--ink)',
-            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {LV.project} · {LV.version}
-          </div>
-          <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--mute)' }}>
-            Übersicht · {LV.sections.length} Abschnitte
-          </div>
-        </div>
       </div>
 
       {/* Struktur header */}
@@ -897,7 +903,7 @@ function Tree({ width, collapsed, setCollapsed, selSection, selPos, view, setVie
               <div onClick={() => {toggle(sec.id);onSection(sec.id);}}
               style={{
                 display: 'flex', alignItems: 'center', gap: 6, padding: '5px 12px',
-                borderLeft: selSection === sec.id && !selPos ? '2px solid var(--blue)' : '2px solid transparent',
+                borderLeft: selSection === sec.id && !selPos ? '2px solid var(--blue)' : `2px solid ${secVps[0] ? secVps[0].color : 'transparent'}`,
                 background: selSection === sec.id && !selPos ? 'var(--blueS)' : 'transparent',
                 fontFamily: 'var(--mono)', fontSize: 11,
                 color: selSection === sec.id && !selPos ? 'var(--blueD)' : 'var(--ink)',
@@ -906,7 +912,6 @@ function Tree({ width, collapsed, setCollapsed, selSection, selPos, view, setVie
                 <span style={{ width: 10, color: 'var(--mute)', fontSize: 9 }}>{open ? '▾' : '▸'}</span>
                 <span style={{ color: 'var(--mute)', fontSize: 10, width: 22 }}>{sec.code}</span>
                 <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontWeight: 500 }}>{sec.label}</span>
-                <VpDots vps={secVps} max={4} />
                 <Status s={sec.status} dotOnly />
                 <span style={{ color: 'var(--mute)', fontSize: 9, fontFamily: 'var(--mono)',
                   minWidth: 32, textAlign: 'right' }}>
@@ -929,7 +934,6 @@ function Tree({ width, collapsed, setCollapsed, selSection, selPos, view, setVie
                     opacity: pDim ? 0.32 : 1,
                     cursor: 'pointer'
                   }}>
-                    <VpDots vps={pvps} max={4} />
                     <span style={{ color: 'var(--mute)', fontSize: 10, width: 42 }}>{p.code}</span>
                     <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.label}</span>
                     <Status s={p.status} dotOnly />
@@ -1059,11 +1063,105 @@ function PF({ l, v }) {
 
 }
 
-function PropsPanel({ width, section, position, assignees, tasks, notes }) {
+function PropsPanel({ width, section, position, lot, project, assignees, tasks, notes }) {
+  const shell = { width, background: 'var(--white)', borderLeft: '1px solid var(--line)',
+    display: 'flex', flexDirection: 'column', flexShrink: 0, overflow: 'hidden' };
+
+  // ── PROJECT (hover on project bubble)
+  if (project) {
+    const projPos = LV.sections.reduce((a, s) => a + s.positions.length, 0)
+      + LOTS.reduce((a, l) => a + (l.mock?.count || 0), 0);
+    const projCost = LV.sections.reduce((a, s) => a + s.positions.reduce((b, p) => b + (p.menge || 0) * (p.ep || 0), 0), 0)
+      + LOTS.reduce((a, l) => a + (l.mock?.cost || 0), 0);
+    const projVol = LV.sections.reduce((a, s) => a + (s.volume || 0), 0)
+      + LOTS.reduce((a, l) => a + (l.mock?.volume || 0), 0);
+    return (
+      <div style={shell}>
+        <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--line)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--mute)', letterSpacing: .6 }}>PROJEKT</span>
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--dim)', border: '1px solid var(--line2)', padding: '0 5px', lineHeight: '15px' }}>{LV.version}</span>
+          </div>
+          <div style={{ fontFamily: 'var(--sans)', fontSize: 18, fontWeight: 700, color: 'var(--ink)' }}>{LV.project}</div>
+        </div>
+        <div style={{ flex: 1, overflow: 'auto' }}>
+          <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--grid)' }}>
+            <div style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: .6, color: 'var(--mute)', marginBottom: 4 }}>KENNZAHLEN</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 18px' }}>
+              <PF l="Lose" v={LOTS.length} />
+              <PF l="Abschnitte" v={LV.sections.length} />
+              <PF l="Positionen" v={projPos.toLocaleString('de-DE')} />
+              <PF l="Volumen" v={`${projVol.toLocaleString('de-DE')} m³`} />
+              <PF l="Gesamtpreis" v={`${projCost.toLocaleString('de-DE', { maximumFractionDigits: 0 })} €`} />
+            </div>
+          </div>
+          <div style={{ padding: '12px 16px' }}>
+            <div style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: .6, color: 'var(--mute)', marginBottom: 6 }}>LOSE</div>
+            {LOTS.map((l) => {
+              const secs = l.sectionIds.map((id) => LV.sections.find((s) => s.id === id)).filter(Boolean);
+              const pc = secs.length ? secs.reduce((a, s) => a + s.positions.length, 0) : (l.mock?.count || 0);
+              return (
+                <div key={l.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0',
+                  borderBottom: '1px solid var(--grid)', fontFamily: 'var(--mono)', fontSize: 10.5 }}>
+                  <span style={{ color: 'var(--mute)', width: 16 }}>{l.num}</span>
+                  <span style={{ flex: 1, color: 'var(--ink)' }}>{l.label}</span>
+                  <span style={{ color: 'var(--dim)' }}>{pc.toLocaleString('de-DE')} Pos.</span>
+                  <Status s={l.status} dotOnly />
+                </div>);
+            })}
+          </div>
+        </div>
+      </div>);
+  }
+
+  // ── LOT (hover on lot bubble)
+  if (lot) {
+    const secs = lot.sectionIds.map((id) => LV.sections.find((s) => s.id === id)).filter(Boolean);
+    const real = secs.length > 0;
+    const posCount = real ? secs.reduce((a, s) => a + s.positions.length, 0) : (lot.mock?.count || 0);
+    const vol = real ? secs.reduce((a, s) => a + (s.volume || 0), 0) : (lot.mock?.volume || 0);
+    const cost = real ? secs.reduce((a, s) => a + s.positions.reduce((b, p) => b + (p.menge || 0) * (p.ep || 0), 0), 0) : (lot.mock?.cost || 0);
+    return (
+      <div style={shell}>
+        <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--line)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--mute)', letterSpacing: .6 }}>LOS {lot.num}</span>
+            <Status s={lot.status} />
+          </div>
+          <div style={{ fontFamily: 'var(--sans)', fontSize: 18, fontWeight: 600, color: 'var(--ink)' }}>{lot.label}</div>
+        </div>
+        <div style={{ flex: 1, overflow: 'auto' }}>
+          <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--grid)' }}>
+            <div style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: .6, color: 'var(--mute)', marginBottom: 4 }}>KENNZAHLEN</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 18px' }}>
+              <PF l="Abschnitte" v={real ? secs.length : '—'} />
+              <PF l="Positionen" v={posCount.toLocaleString('de-DE')} />
+              {vol > 0 && <PF l="Volumen" v={`${vol.toLocaleString('de-DE')} m³`} />}
+              <PF l="Gesamtpreis" v={`${cost.toLocaleString('de-DE', { maximumFractionDigits: 0 })} €`} />
+            </div>
+          </div>
+          {real ?
+          <div style={{ padding: '12px 16px' }}>
+            <div style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: .6, color: 'var(--mute)', marginBottom: 6 }}>ABSCHNITTE</div>
+            {secs.map((s) =>
+            <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0',
+              borderBottom: '1px solid var(--grid)', fontFamily: 'var(--mono)', fontSize: 10.5 }}>
+                <span style={{ color: 'var(--mute)', width: 22 }}>{s.code}</span>
+                <span style={{ flex: 1, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.label}</span>
+                <span style={{ color: 'var(--dim)' }}>{s.positions.length}</span>
+                <Status s={s.status} dotOnly />
+              </div>)}
+          </div> :
+          <div style={{ padding: '16px', fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--mute)', lineHeight: 1.6 }}>
+            Los noch nicht ausgearbeitet — Kennzahlen sind Schätzwerte aus der Projektplanung.
+          </div>}
+        </div>
+      </div>);
+  }
+
   if (!section && !position) {
     return (
-      <div style={{ width, background: 'var(--white)', borderLeft: '1px solid var(--line)',
-        display: 'flex', flexDirection: 'column', flexShrink: 0, overflow: 'hidden' }}>
+      <div style={shell}>
         <div style={{ padding: '18px 16px', borderBottom: '1px solid var(--line)' }}>
           <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--mute)', letterSpacing: .6 }}>EIGENSCHAFTEN</div>
           <div style={{ fontFamily: 'var(--sans)', fontSize: 14, fontWeight: 600, color: 'var(--ink)', marginTop: 4 }}>Übersicht</div>
@@ -1453,6 +1551,38 @@ function App() {
     return sectionObj.positions.find((p) => p.code === selPos) || null;
   }, [sectionObj, selPos]);
 
+  // Hover preview for the right panel — show info on hover, snap back on leave.
+  // Small trailing delay on clearing avoids flicker while sweeping the canvas.
+  const [panelHover, setPanelHover] = useState(null);
+  useEffect(() => {
+    if (hovered) { setPanelHover(hovered); return; }
+    const t = setTimeout(() => setPanelHover(null), 140);
+    return () => clearTimeout(t);
+  }, [hovered]);
+  const hoverTarget = useMemo(() => {
+    const id = panelHover;
+    if (!id || id.startsWith('cluster:') || id.startsWith('doc:')) return null;
+    if (id === 'project') return { project: true };
+    const lot = LOTS.find((l) => l.id === id);
+    if (lot) return { lot };
+    if (id.startsWith('pos:')) {
+      const code = id.slice(4);
+      for (const s of LV.sections) {
+        const p = s.positions.find((x) => x.code === code);
+        if (p) return { section: s, position: p };
+      }
+      return null;
+    }
+    const sec = LV.sections.find((s) => s.id === id);
+    if (sec) return { section: sec };
+    return null;
+  }, [panelHover]);
+
+  // Hover only drives the right panel while the bubble graph is visible.
+  // In the drilled-in table view the graph is unmounted, so a stale `hovered`
+  // must not override the row the user just clicked.
+  const tableHover = sectionObj ? null : hoverTarget;
+
   // ESC to go back one level
   useEffect(() => {
     const h = (e) => {
@@ -1534,6 +1664,7 @@ function App() {
               hovered={hovered} setHovered={setHovered}
               onPick={(sid, code) => {setSelSection(sid);setSelPos(code || null);}}
               tasks={tasks}
+              notes={notes}
               sizeMode={sizeMode}
               filters={filters} search={search}
               demoEnabled={demoEnabled} setDemoEnabled={setDemoEnabled} hideMode={hideMode} />
@@ -1546,7 +1677,11 @@ function App() {
         {view === 'lv' &&
         <>
             <ResizeHandle value={rightW} setValue={setRightW} min={260} max={560} sign={-1} />
-            <PropsPanel width={rightW} section={sectionObj} position={positionObj}
+            <PropsPanel width={rightW}
+          section={tableHover ? tableHover.section || null : sectionObj}
+          position={tableHover ? tableHover.position || null : positionObj}
+          lot={tableHover ? tableHover.lot || null : null}
+          project={tableHover ? !!tableHover.project : false}
           assignees={assignees} tasks={tasks} notes={notes} />
           </>
         }
